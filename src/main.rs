@@ -1,11 +1,11 @@
-use device_mapper::{ArrayInfo, DeviceInfo};
+use device_mapper::MdpSuperblock1;
 
 fn main() {
-    println!("Hello, world!");
-    let res = ArrayInfo::read_from_file("../blog/device1").unwrap();
-    println!("{res:?}");
-    println!("{}", res.name().unwrap());
-
-    let res = DeviceInfo::read_from_file("../blog/device1").unwrap();
-    println!("{res:?}");
+    let res = MdpSuperblock1::from_file("device1", 0x1000).unwrap();
+    println!(
+        "{res:?}, array uuid {}, dev uuid {}, set name {}",
+        res.array_info.uuid(),
+        res.device_info.uuid(),
+        res.array_info.name().unwrap(),
+    );
 }

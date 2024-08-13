@@ -1,18 +1,19 @@
-use byteorder::{LittleEndian, ReadBytesExt};
+use arrayref::array_ref;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Error, Read, Seek, SeekFrom};
 use std::string::FromUtf8Error;
+use uuid::Uuid;
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Debug)]
 pub struct ArrayInfo {
     pub magic: u32,
     pub major_version: u32,
     pub feature_map: u32,
-    pub pad0: u32,
-    pub set_uuid: [u8; 16],
-    pub set_name: [u8; 32],
-    pub ctime: u64,      // /* lo 40 bits are seconds, top 24 are microseconds or 0*/
+    _pad0: u32,
+    set_uuid: [u8; 16],
+    set_name: [u8; 32],
+    ctime: u64,          // /* lo 40 bits are seconds, top 24 are microseconds or 0*/
     pub level: u32,      /* -4 (multipath), -1 (linear), 0,1,4,5 */
     pub layout: u32,     /* used for raid5, raid6, raid10, and raid0 */
     pub size: u64,       // in 512b sectors
@@ -20,10 +21,20 @@ pub struct ArrayInfo {
     pub raid_disks: u32, // count
     // Union of offset + size for MD_FEATURE_PPL
     // TODO
-    pub bitmap_offset: u32,
+    opaque_union_bitmap_offset_ppl: u32,
 }
 
 impl ArrayInfo {
+    const SUPERBLOCK_MAGIC: u32 = 0xa92b4efc;
+    const MAJOR_VERSION: u32 = 1;
+
+    pub fn creation(&self) -> chrono::NaiveDateTime {
+        let seconds: u64 = self.ctime & 0xffffffff; // bottom 40b
+        let micros: u32 = ((self.ctime & 0xffffff00000000) >> 40) as u32; // top 24b
+        chrono::DateTime::from_timestamp(seconds as i64, micros * 1000)
+            .unwrap()
+            .naive_local()
+    }
     pub fn name(&self) -> Result<String, FromUtf8Error> {
         let filtered: Vec<u8> = self
             .set_name
@@ -33,49 +44,30 @@ impl ArrayInfo {
             .collect();
         String::from_utf8(filtered)
     }
-    pub fn read_from_file(path: &str) -> io::Result<Self> {
-        let mut file = File::open(path)?;
-
-        // Seek to the 0x1000 (4096) byte offset
-        file.seek(SeekFrom::Start(0x1000))?;
-        let magic = file.read_u32::<LittleEndian>()?;
-        let major_version = file.read_u32::<LittleEndian>()?;
-        let feature_map = file.read_u32::<LittleEndian>()?;
-        let pad0 = file.read_u32::<LittleEndian>()?;
-
-        let mut set_uuid = [0u8; 16];
-        file.read_exact(&mut set_uuid)?;
-
-        let mut set_name = [0u8; 32];
-        file.read_exact(&mut set_name)?;
-
-        let ctime = file.read_u64::<LittleEndian>()?;
-        let level = file.read_u32::<LittleEndian>()?;
-        let layout = file.read_u32::<LittleEndian>()?;
-        let size = file.read_u64::<LittleEndian>()?;
-        let chunksize = file.read_u32::<LittleEndian>()?;
-        let raid_disks = file.read_u32::<LittleEndian>()?;
-        let bitmap_offset = file.read_u32::<LittleEndian>()?;
-
-        Ok(ArrayInfo {
-            magic,
-            major_version,
-            feature_map,
-            pad0,
-            set_uuid,
-            set_name,
-            ctime,
-            level,
-            layout,
-            size,
-            chunksize,
-            raid_disks,
-            bitmap_offset,
-        })
+    pub fn uuid(&self) -> Uuid {
+        Uuid::from_slice(&self.set_uuid).unwrap()
+    }
+    pub fn from_bytes(buf: &[u8; 100]) -> io::Result<Self> {
+        let res: Self = unsafe { std::mem::transmute(*buf) };
+        let magic = res.magic;
+        if magic != ArrayInfo::SUPERBLOCK_MAGIC {
+            return Err(Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid Magic, got {:x}", magic),
+            ));
+        }
+        let major_version = res.major_version;
+        if major_version != ArrayInfo::MAJOR_VERSION {
+            return Err(Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid major version, got {:x}", major_version),
+            ));
+        }
+        Ok(res)
     }
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Debug)]
 pub struct FeatureBit4 {
     pub new_level: u32,
@@ -86,6 +78,12 @@ pub struct FeatureBit4 {
     pub new_offset: u32,
 }
 
+impl FeatureBit4 {
+    pub fn from_bytes(buf: &[u8; 28]) -> io::Result<Self> {
+        let res: Self = unsafe { std::mem::transmute(*buf) };
+        Ok(res)
+    }
+}
 #[repr(C)]
 #[derive(Debug)]
 pub struct DeviceInfo {
@@ -105,48 +103,12 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
-    pub fn read_from_file(path: &str) -> io::Result<Self> {
-        let mut file = File::open(path)?;
-
-        // Calculate the offset for DeviceInfo
-        // It starts after ArrayInfo and FeatureBit4
-        let sizeof_arrayinfo = 96;
-        let sizeof_featurebit4 = 32;
-        //DeviceInfo: Size: 64 bytes
-        //ArrayStateInfo: Size: 64 bytes
-        let offset = 0x1000 + sizeof_featurebit4 + sizeof_arrayinfo;
-        file.seek(SeekFrom::Start(offset as u64))?;
-
-        // 128
-        let data_offset = file.read_u64::<LittleEndian>()?;
-        // 136
-        let data_size = file.read_u64::<LittleEndian>()?;
-        let super_offset = file.read_u64::<LittleEndian>()?;
-        let recovery_offset = file.read_u64::<LittleEndian>()?;
-        let dev_number = file.read_u32::<LittleEndian>()?;
-        let cnt_corrected_read = file.read_u32::<LittleEndian>()?;
-
-        let mut device_uuid = [0u8; 16];
-        file.read_exact(&mut device_uuid)?;
-
-        let devflags = file.read_u8()?;
-        let bblog_shift = file.read_u8()?;
-        let bblog_size = file.read_u16::<LittleEndian>()?;
-        let bblog_offset = file.read_u32::<LittleEndian>()?;
-
-        Ok(DeviceInfo {
-            data_offset,
-            data_size,
-            super_offset,
-            recovery_offset,
-            dev_number,
-            cnt_corrected_read,
-            device_uuid,
-            devflags,
-            bblog_shift,
-            bblog_size,
-            bblog_offset,
-        })
+    pub fn from_bytes(buf: &[u8; 64]) -> io::Result<Self> {
+        let res: Self = unsafe { std::mem::transmute(*buf) };
+        Ok(res)
+    }
+    pub fn uuid(&self) -> Uuid {
+        Uuid::from_slice(&self.device_uuid).unwrap()
     }
 }
 
@@ -159,8 +121,13 @@ pub struct ArrayStateInfo {
     pub sb_csum: u32,
     pub max_dev: u32,
     pub pad3: [u8; 32],
-    // Note: We're using a fixed size for pad3 instead of 64-32
-    // You may want to adjust this based on your specific needs
+}
+
+impl ArrayStateInfo {
+    pub fn from_bytes(buf: &[u8; 64]) -> io::Result<Self> {
+        let res: Self = unsafe { std::mem::transmute(*buf) };
+        Ok(res)
+    }
 }
 
 #[derive(Debug)]
@@ -170,4 +137,35 @@ pub struct MdpSuperblock1 {
     pub device_info: DeviceInfo,
     pub array_state_info: ArrayStateInfo,
     pub dev_roles: Vec<u16>,
+}
+
+impl MdpSuperblock1 {
+    pub const MAX_SIZE: usize = 4096;
+    pub fn from_bytes(buf: &[u8]) -> io::Result<Self> {
+        let array_info = ArrayInfo::from_bytes(array_ref!(buf, 0, 100))?;
+        let feature_bit4 = FeatureBit4::from_bytes(array_ref!(buf, 100, 28))?;
+        // START of DeviceInfo is def 128
+        let device_info = DeviceInfo::from_bytes(array_ref!(buf, 128, 64))?;
+        let array_state_info = ArrayStateInfo::from_bytes(array_ref!(buf, 192, 64))?;
+
+        // TODO
+        let dev_roles = Vec::new();
+
+        Ok(Self {
+            array_info,
+            feature_bit4,
+            device_info,
+            array_state_info,
+            dev_roles,
+        })
+    }
+    pub fn from_file(path: &str, offset: u64) -> io::Result<Self> {
+        let mut file = File::open(path)?;
+
+        file.seek(SeekFrom::Start(offset))?;
+        let mut buf = [0; Self::MAX_SIZE];
+        file.read_exact(&mut buf)?;
+
+        Self::from_bytes(&buf)
+    }
 }
