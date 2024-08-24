@@ -61,6 +61,7 @@ impl From<ArrayLayout> for u32 {
 }
 
 fn instant_to_arrayinfo_format(instant: Instant) -> u64 {
+    // FIXME: completely wrong
     let duration = instant.elapsed();
     let seconds = duration.as_secs();
     let microseconds = duration.subsec_micros();
@@ -88,7 +89,6 @@ impl ArrayInfo {
         level: ArrayLevel,
         layout: ArrayLayout,
         size: u64,
-        chunksize: u32,
         raid_disks: u32,
     ) -> ArrayInfo {
         ArrayInfo {
@@ -101,8 +101,8 @@ impl ArrayInfo {
             ctime: instant_to_arrayinfo_format(ctime),
             level: level.into(),
             layout: layout.into(),
-            size,
-            chunksize,
+            size: size - 2048, // reserve 1MB?
+            chunksize: 0,
             raid_disks,
             opaque_union_bitmap_offset_ppl: 0, // TODO?
         }
@@ -190,17 +190,17 @@ pub struct DeviceInfo {
 impl DeviceInfo {
     pub fn new(device_size: u64, dev_number: u32, device_uuid: Option<Uuid>) -> Self {
         DeviceInfo {
-            data_offset: 0x1000,
-            data_size: device_size - 0x1000,
-            super_offset: 0x0,
-            recovery_offset: device_size,
+            data_offset: 0x800,            // why; on top of superblock offset?
+            data_size: device_size - 2048, // reserve 1MB? why?
+            super_offset: 0x8,             // 8* 512b block = 4KiB = 0x1000
+            recovery_offset: 0,
             dev_number,
             cnt_corrected_read: 0, // Initialize to 0
             device_uuid: device_uuid.unwrap_or_else(Uuid::new_v4).into_bytes(),
             devflags: 0,
             bblog_shift: 0,
-            bblog_size: 0,
-            bblog_offset: 0,
+            bblog_size: 8,    // ?
+            bblog_offset: 16, // ?
         }
     }
 
@@ -237,7 +237,7 @@ impl ArrayStateInfo {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MdpSuperblock1 {
     pub array_info: ArrayInfo,
     pub feature_bit4: FeatureBit4,
@@ -271,7 +271,6 @@ impl MdpSuperblock1 {
         host: &str,
         name: &str,
         size_bytes: u64,
-        block_size: u32,
         disk_count: u32,
         device_info: DeviceInfo,
     ) -> Result<MdpSuperblock1, impl std::error::Error> {
@@ -288,9 +287,8 @@ impl MdpSuperblock1 {
             &format!("{host}:{name}"),
             now,
             ArrayLevel::Raid1,
-            ArrayLayout::LeftSymmetric,
+            ArrayLayout::LeftAsymmetric,
             size_bytes,
-            block_size,
             disk_count,
         );
 
@@ -304,28 +302,55 @@ impl MdpSuperblock1 {
             new_offset: 0,
         };
 
+        let max_dev = 0x80; // 128
         let array_state_info = ArrayStateInfo {
             utime: 0,
-            events: 0,
-            resync_offset: 0,
+            events: 16,                        // why?
+            resync_offset: 0xffffffffffffffff, // why
             sb_csum: 0,
-            max_dev: disk_count,
+            max_dev,
             pad3: [0; 32],
         };
 
-        let mut dev_roles = vec![0xffff as u16; 0x80];
+        let mut dev_roles = vec![0xffff as u16; max_dev as usize];
         for i in 0..disk_count {
             dev_roles[i as usize] = i as u16;
         }
-        println!("{:?}", dev_roles);
 
-        Ok(MdpSuperblock1 {
+        let mut sb = MdpSuperblock1 {
             array_info,
             feature_bit4,
             device_info,
             array_state_info,
             dev_roles,
-        })
+        };
+        let csum = sb.calculate_sb_csum();
+        sb.array_state_info.sb_csum = csum;
+        Ok(sb)
+    }
+
+    pub fn calculate_sb_csum(&self) -> u32 {
+        // checksum is calculated with checksum set to 0
+        let mut new_sb = self.clone();
+        new_sb.array_state_info.sb_csum = 0;
+
+        // the superblock (without role information) is 256 bytes long
+        //let bytes = &new_sb.as_bytes()[0..256];
+        let bytes = &new_sb.as_bytes();
+
+        // Calculate checksum
+        let mut csum: u64 = 0;
+        for chunk in bytes.chunks(4) {
+            let value = match chunk.len() {
+                4 => u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]),
+                2 => u16::from_le_bytes([chunk[0], chunk[1]]) as u32,
+                _ => 0,
+            };
+            csum += value as u64;
+        }
+
+        // Fold the upper 32 bits into the lower 32 bits
+        ((csum & 0xffffffff) + (csum >> 32)) as u32
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
