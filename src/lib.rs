@@ -293,6 +293,7 @@ impl MdpSuperblock1 {
         size_bytes: u64,
         disk_count: u32,
         device_info: DeviceInfo,
+        raid_level: ArrayLevel,
     ) -> Result<MdpSuperblock1, impl std::error::Error> {
         if host.len() + name.len() > 32 {
             return Err(std::io::Error::new(
@@ -307,7 +308,7 @@ impl MdpSuperblock1 {
             array_uuid,
             &format!("{host}:{name}"),
             now,
-            ArrayLevel::Raid1,
+            raid_level,
             ArrayLayout::LeftAsymmetric,
             size_bytes,
             disk_count,

@@ -30,3 +30,7 @@ ioctl!(write set_array_info with MD_MAJOR, 0x23; mdu_array_info_t);
 ioctl!(write add_new_disk with MD_MAJOR, 0x21; mdu_disk_info_t);
 
 ioctl!(read get_disk_info with MD_MAJOR, 0x12; mdu_disk_info_t);
+
+const BLKGETSIZE64_CODE: u8 = 0x12; // Defined in linux/fs.h
+const BLKGETSIZE64_SEQ: u8 = 114;
+ioctl!(read blkgetsize64 with BLKGETSIZE64_CODE, BLKGETSIZE64_SEQ; u64);
