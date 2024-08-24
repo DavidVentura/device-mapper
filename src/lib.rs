@@ -249,14 +249,33 @@ pub struct MdpSuperblock1 {
 impl MdpSuperblock1 {
     pub const MAX_SIZE: usize = 4096;
     pub fn from_bytes(buf: &[u8]) -> io::Result<Self> {
+        if buf.len() < 256 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Buffer too short for MdpSuperblock1",
+            ));
+        }
+
         let array_info = ArrayInfo::from_bytes(array_ref!(buf, 0, 100))?;
         let feature_bit4 = FeatureBit4::from_bytes(array_ref!(buf, 100, 28))?;
-        // START of DeviceInfo is def 128
         let device_info = DeviceInfo::from_bytes(array_ref!(buf, 128, 64))?;
         let array_state_info = ArrayStateInfo::from_bytes(array_ref!(buf, 192, 64))?;
 
-        // TODO
-        let dev_roles = Vec::new();
+        let dev_roles_count = array_state_info.max_dev as usize;
+
+        if buf.len() < 256 + dev_roles_count * 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Buffer too short for dev_roles",
+            ));
+        }
+
+        // fixed-size part of the superblock is 256b
+        let dev_roles = buf[256..]
+            .chunks_exact(2)
+            .take(dev_roles_count)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
 
         Ok(Self {
             array_info,
@@ -270,6 +289,7 @@ impl MdpSuperblock1 {
     pub fn new(
         host: &str,
         name: &str,
+        uuid: Option<Uuid>,
         size_bytes: u64,
         disk_count: u32,
         device_info: DeviceInfo,
@@ -280,7 +300,8 @@ impl MdpSuperblock1 {
                 "Length of host + name must be <=32",
             ));
         }
-        let array_uuid = Uuid::new_v4();
+        let array_uuid = uuid.unwrap_or_else(Uuid::new_v4);
+
         let now = Instant::now();
         let array_info = ArrayInfo::new(
             array_uuid,
@@ -292,7 +313,7 @@ impl MdpSuperblock1 {
             disk_count,
         );
 
-        // Create dummy FeatureBit4 and ArrayStateInfo
+        // Create dummy FeatureBit4 -- no idea what for
         let feature_bit4 = FeatureBit4 {
             new_level: 0,
             reshape_position: 0,
@@ -305,8 +326,8 @@ impl MdpSuperblock1 {
         let max_dev = 0x80; // 128
         let array_state_info = ArrayStateInfo {
             utime: 0,
-            events: 16,                        // why?
-            resync_offset: 0xffffffffffffffff, // why
+            events: 16, // why?
+            resync_offset: 0xffffffffffffffff,
             sb_csum: 0,
             max_dev,
             pad3: [0; 32],
@@ -334,11 +355,8 @@ impl MdpSuperblock1 {
         let mut new_sb = self.clone();
         new_sb.array_state_info.sb_csum = 0;
 
-        // the superblock (without role information) is 256 bytes long
-        //let bytes = &new_sb.as_bytes()[0..256];
         let bytes = &new_sb.as_bytes();
 
-        // Calculate checksum
         let mut csum: u64 = 0;
         for chunk in bytes.chunks(4) {
             let value = match chunk.len() {

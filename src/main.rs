@@ -1,6 +1,7 @@
 use device_mapper::{DeviceInfo, MdpSuperblock1};
 use std::fs::File;
 use std::io::prelude::*;
+use uuid::Uuid;
 /*
 use std::os::unix::fs::FileExt;
 use std::fs::{OpenOptions};
@@ -64,10 +65,27 @@ fn main() {
 
     let host = "computer";
     let array_name = "the-array";
+    let array_uuid = Some(Uuid::new_v4());
 
-    let sb1 = MdpSuperblock1::new(host, array_name, 0xa00000 / 512, 2, device_info_1).unwrap();
+    let sb1 = MdpSuperblock1::new(
+        host,
+        array_name,
+        array_uuid,
+        0xa00000 / 512,
+        2,
+        device_info_1,
+    )
+    .unwrap();
     println!("BAD\n{:#?}", sb1);
-    let sb2 = MdpSuperblock1::new(host, array_name, 0xa00000 / 512, 2, device_info_2).unwrap();
+    let sb2 = MdpSuperblock1::new(
+        host,
+        array_name,
+        array_uuid,
+        0xa00000 / 512,
+        2,
+        device_info_2,
+    )
+    .unwrap();
 
     let mut f1 = File::create("my-device-1").unwrap();
     let mut f2 = File::create("my-device-2").unwrap();
