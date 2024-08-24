@@ -22,14 +22,10 @@ fn test_raid1_device_1() {
     let dev_size = sb.array_info.size;
     let disks = sb.array_info.raid_disks;
     assert_eq!(fm, 0);
-    println!("{:?}", sb.array_info.creation());
-    println!("{:?}", sb.array_info);
     assert_eq!(level, 1);
     assert_eq!(dev_size, 18432); // in 512b sectors
     assert_eq!(disks, 2);
 
-    println!("dev {:?}", sb.device_info);
-    println!("arr state {:?}", sb.array_state_info);
     assert_eq!(sb.array_state_info.sb_csum, 0x9741e5f7);
     assert_eq!(
         sb.array_info.uuid(),
@@ -40,6 +36,7 @@ fn test_raid1_device_1() {
         sb.device_info.uuid(),
         Uuid::parse_str("201e03cf-4205-c8bf-e714-52f868f6b6cd").unwrap()
     );
+    assert_eq!(sb.calculate_sb_csum(), 0x9741e5f7);
 }
 
 #[test]
@@ -55,4 +52,62 @@ fn test_raid1_device_2() {
         sb.device_info.uuid(),
         Uuid::parse_str("fc9b0876-925c-3729-5f47-971af9ce24fc").unwrap()
     );
+    assert_eq!(sb.calculate_sb_csum(), 0xf869c62b);
 }
+/*
+r1_d1:
+          Magic : a92b4efc
+        Version : 1.2
+    Feature Map : 0x0
+     Array UUID : 24d684dd:bc6760fc:a5d3a49f:592b1b42
+           Name : worklaptop:0  (local to host worklaptop)
+  Creation Time : Tue Aug 13 11:34:43 2024
+     Raid Level : raid1
+   Raid Devices : 2
+
+ Avail Dev Size : 18432 sectors (9.00 MiB 9.44 MB)
+     Array Size : 9216 KiB (9.00 MiB 9.44 MB)
+    Data Offset : 2048 sectors
+   Super Offset : 8 sectors
+   Unused Space : before=1968 sectors, after=0 sectors
+          State : clean
+    Device UUID : 201e03cf:4205c8bf:e71452f8:68f6b6cd
+
+    Update Time : Tue Aug 13 11:34:43 2024
+  Bad Block Log : 512 entries available at offset 16 sectors
+       Checksum : 9741e5f7 - correct
+         Events : 16
+
+
+   Device Role : Active device 0
+   Array State : AA ('A' == active, '.' == missing, 'R' == replacing)
+*/
+
+/*
+r1_d2:
+          Magic : a92b4efc
+        Version : 1.2
+    Feature Map : 0x0
+     Array UUID : 24d684dd:bc6760fc:a5d3a49f:592b1b42
+           Name : worklaptop:0  (local to host worklaptop)
+  Creation Time : Tue Aug 13 11:34:43 2024
+     Raid Level : raid1
+   Raid Devices : 2
+
+ Avail Dev Size : 18432 sectors (9.00 MiB 9.44 MB)
+     Array Size : 9216 KiB (9.00 MiB 9.44 MB)
+    Data Offset : 2048 sectors
+   Super Offset : 8 sectors
+   Unused Space : before=1968 sectors, after=0 sectors
+          State : clean
+    Device UUID : fc9b0876:925c3729:5f47971a:f9ce24fc
+
+    Update Time : Tue Aug 13 11:34:43 2024
+  Bad Block Log : 512 entries available at offset 16 sectors
+       Checksum : f869c62b - correct
+         Events : 16
+
+
+   Device Role : Active device 1
+   Array State : AA ('A' == active, '.' == missing, 'R' == replacing)
+*/
