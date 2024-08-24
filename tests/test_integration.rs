@@ -54,14 +54,74 @@ fn test_raid1_device_2() {
     );
     assert_eq!(sb.calculate_sb_csum(), 0xf869c62b);
 }
+
+#[test]
+fn test_array_info_consistency() {
+    let sb1 = read_gzipped_superblock("tests/testdata/r1_d1.gz");
+    let sb2 = read_gzipped_superblock("tests/testdata/r1_d2.gz");
+
+    assert_eq!(sb1.array_info.name(), sb2.array_info.name());
+    assert_eq!(sb1.array_info.uuid(), sb2.array_info.uuid());
+    /*
+    assert_eq!(sb1.array_info.level, sb2.array_info.level);
+    assert_eq!(sb1.array_info.raid_disks, sb2.array_info.raid_disks);
+    assert_eq!(sb1.array_info.size, sb2.array_info.size);
+    */
+}
+
+#[test]
+fn test_device_info_differences() {
+    let sb1 = read_gzipped_superblock("tests/testdata/r1_d1.gz");
+    let sb2 = read_gzipped_superblock("tests/testdata/r1_d2.gz");
+
+    assert_ne!(sb1.device_info.uuid(), sb2.device_info.uuid());
+    assert_ne!(sb1.array_state_info.sb_csum, sb2.array_state_info.sb_csum);
+}
+
+#[test]
+fn test_creation_time() {
+    let sb = read_gzipped_superblock("tests/testdata/r1_d1.gz");
+    let creation_time = sb.array_info.creation();
+
+    assert_eq!(
+        creation_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+        "2024-08-13 09:34:43"
+    );
+    // creation is in UTC but mdadm shows in local timezone
+    // can run mdadm with TZ=UTC env set
+}
+
+#[test]
+fn test_feature_map() {
+    let sb = read_gzipped_superblock("tests/testdata/r1_d1.gz");
+    let fm = sb.array_info.feature_map;
+    assert_eq!(fm, 0);
+}
+
+#[test]
+fn test_array_size() {
+    let sb = read_gzipped_superblock("tests/testdata/r1_d1.gz");
+    let size = sb.array_info.size;
+    assert_eq!(size, 18432); // 9.00 MiB in 512b sectors
+}
+
+#[test]
+fn test_events_count() {
+    let sb1 = read_gzipped_superblock("tests/testdata/r1_d1.gz");
+    let sb2 = read_gzipped_superblock("tests/testdata/r1_d2.gz");
+
+    assert_eq!(sb1.array_state_info.events, 16);
+    assert_eq!(sb2.array_state_info.events, 16);
+}
 /*
+TZ=UTC mdadm --examine testdata/r1_d1
 r1_d1:
           Magic : a92b4efc
         Version : 1.2
     Feature Map : 0x0
      Array UUID : 24d684dd:bc6760fc:a5d3a49f:592b1b42
            Name : worklaptop:0  (local to host worklaptop)
-  Creation Time : Tue Aug 13 11:34:43 2024
+  Creation Time : Tue Aug 13 09:34:43 2024
      Raid Level : raid1
    Raid Devices : 2
 
@@ -73,7 +133,7 @@ r1_d1:
           State : clean
     Device UUID : 201e03cf:4205c8bf:e71452f8:68f6b6cd
 
-    Update Time : Tue Aug 13 11:34:43 2024
+    Update Time : Tue Aug 13 09:34:43 2024
   Bad Block Log : 512 entries available at offset 16 sectors
        Checksum : 9741e5f7 - correct
          Events : 16
@@ -90,7 +150,7 @@ r1_d2:
     Feature Map : 0x0
      Array UUID : 24d684dd:bc6760fc:a5d3a49f:592b1b42
            Name : worklaptop:0  (local to host worklaptop)
-  Creation Time : Tue Aug 13 11:34:43 2024
+  Creation Time : Tue Aug 13 09:34:43 2024
      Raid Level : raid1
    Raid Devices : 2
 
@@ -102,7 +162,7 @@ r1_d2:
           State : clean
     Device UUID : fc9b0876:925c3729:5f47971a:f9ce24fc
 
-    Update Time : Tue Aug 13 11:34:43 2024
+    Update Time : Tue Aug 13 09:34:43 2024
   Bad Block Log : 512 entries available at offset 16 sectors
        Checksum : f869c62b - correct
          Events : 16
