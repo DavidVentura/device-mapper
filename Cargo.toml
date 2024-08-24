@@ -8,12 +8,14 @@ edition = "2021"
 [dependencies]
 arrayref = "0.3.8"
 chrono = "0.4.38"
-uuid = "1.10.0"
+ioctl-rs = "0.2.0"
+ioctl-sys = "0.8.0"
+uuid = { version = "1.10.0", features = ["v4"] }
 
 [lib]
 name = "device_mapper"
 path = "src/lib.rs"
-
+build = "build.rs"
 
 [[bin]]
 name = "md"
@@ -21,3 +23,6 @@ path = "src/main.rs"
 
 [dev-dependencies]
 flate2 = "1.0.31"
+
+[build-dependencies]
+bindgen = "0.70.1"
