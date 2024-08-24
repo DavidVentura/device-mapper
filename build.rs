@@ -10,7 +10,15 @@ fn main() {
     let bindings = bindgen::Builder::default()
         // The input header we would like to generate
         // bindings for.
+        // Bindings for ioctl structs
         .header("headers/md_u.h")
+        .allowlist_type("mdu_array_info_t")
+        .allowlist_type("mdu_disk_info_t")
+        .allowlist_type("mdu_param_t")
+        // bindings for:
+        //  - operational state bits
+        .header("headers/md_p.h")
+        .allowlist_var("MD_DISK_.*")
         // Finish the builder and generate the bindings.
         .generate()
         // Unwrap the Result and panic on failure.

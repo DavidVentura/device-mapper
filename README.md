@@ -1,6 +1,6 @@
 # mdadm-rs
 
-Can create a RAID1 over devices.
+Can create a RAID1 over devices (files/blockdevs).
 Maybe it can create other types of RAID, but haven't checked.
 
-It will soon be able to assemble devices onto a running array as well.
+It can also assemble devices as an array, with ~no error checking.

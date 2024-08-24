@@ -1,7 +1,10 @@
 use device_mapper::{DeviceInfo, MdpSuperblock1};
 use std::fs::File;
 use std::io::prelude::*;
+use std::os::unix::fs::FileExt;
 use uuid::Uuid;
+
+mod assemble;
 /*
 use std::os::unix::fs::FileExt;
 use std::fs::{OpenOptions};
@@ -41,26 +44,22 @@ fn main() {
     let dev1f = File::open("device1").unwrap();
     dev1f.read_exact_at(&mut buf, 0x1000).unwrap();
     */
+    //assemble::assemble_array(&vec!["my-device-1", "my-device-2"], "md123").unwrap();
+    assemble::assemble_array(&vec!["/dev/loop1", "/dev/loop8"], 123).unwrap();
+}
 
-    let dev1 = MdpSuperblock1::from_file("device1", 0x1000).unwrap();
-    println!(
-        "csum from disk: {}, calculated: {}",
-        dev1.array_state_info.sb_csum,
-        dev1.calculate_sb_csum()
-    );
+fn _create_example_array() {
+    let target_size = 0xa00000; //10MiB
 
-    println!("GOOD\n{:#?}", dev1);
-
-    // Create a new DeviceInfo with reasonable values
     let device_info_1 = DeviceInfo::new(
-        0xa00000 / 512, // device_size = 10M
-        0,              // dev_number: First device in the array
-        None,           // device_uuid: Generate a new UUID
+        target_size / 512, // device_size = 10M
+        0,                 // dev_number: First device in the array
+        None,              // device_uuid: Generate a new UUID
     );
     let device_info_2 = DeviceInfo::new(
-        0xa00000 / 512, // device_size = 10M
-        1,              // dev_number: First device in the array
-        None,           // device_uuid: Generate a new UUID
+        target_size / 512, // device_size = 10M
+        1,                 // dev_number: First device in the array
+        None,              // device_uuid: Generate a new UUID
     );
 
     let host = "computer";
@@ -71,17 +70,16 @@ fn main() {
         host,
         array_name,
         array_uuid,
-        0xa00000 / 512,
+        target_size / 512,
         2,
         device_info_1,
     )
     .unwrap();
-    println!("BAD\n{:#?}", sb1);
     let sb2 = MdpSuperblock1::new(
         host,
         array_name,
         array_uuid,
-        0xa00000 / 512,
+        target_size / 512,
         2,
         device_info_2,
     )
@@ -93,14 +91,13 @@ fn main() {
     f1.seek(std::io::SeekFrom::Start(0x1000)).unwrap();
     f1.write_all(&sb1.as_bytes()).unwrap();
 
-    let one_mb_zeroes = vec![0; 1024 * 1024];
-    for _ in 0..10 {
-        f1.write(&one_mb_zeroes).unwrap();
-    }
+    // not sure why, but `mdadm --examine` will say
+    // mdadm: No md superblock detected on my-device-1.
+    // if there are less than 8KiB after the header
+    // this is not a problem for normal block devices, only artificial cases using files
+    f1.write_at(&[0], target_size - 1).unwrap();
 
     f2.seek(std::io::SeekFrom::Start(0x1000)).unwrap();
     f2.write_all(&sb2.as_bytes()).unwrap();
-    for _ in 0..10 {
-        f2.write(&one_mb_zeroes).unwrap();
-    }
+    f2.write_at(&[0], target_size - 1).unwrap();
 }

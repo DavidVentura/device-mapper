@@ -397,29 +397,3 @@ impl MdpSuperblock1 {
         Self::from_bytes(&buf)
     }
 }
-
-fn get_array_info() {}
-fn assemble() {
-    /* just incase it was started but has no content */
-    // ioctl(mdfd, STOP_ARRAY, NULL);
-    // ._.
-    // set_array_info()
-    // for disk in disks
-    //  add_disk(disk)
-    //
-    //https://github.com/torvalds/linux/blob/v6.10/drivers/md/md.c#L7876
-    //rv = ioctl(mdfd, RUN_ARRAY, NULL);
-}
-fn set_array_info() {
-    /*
-    int md_set_array_info(int fd, struct mdu_array_info_s *array)
-    // https://github.com/torvalds/linux/blob/v6.10/drivers/md/md.c#L7772
-        return ioctl(fd, SET_ARRAY_INFO, array);
-    */
-}
-fn add_disk(md_fd: isize) {
-
-    // struct mdinfo *info
-    // ioctl(mdfd, ADD_NEW_DISK, &info->disk);
-    // https://github.com/torvalds/linux/blob/v6.10/drivers/md/md.c#L7858
-}
