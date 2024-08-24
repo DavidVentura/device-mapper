@@ -28,7 +28,7 @@ pub struct ArrayInfo {
     opaque_union_bitmap_offset_ppl: u32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ArrayLevel {
     Linear = -1,
     Raid0 = 0,
@@ -88,9 +88,32 @@ impl ArrayInfo {
         ctime: Instant,
         level: ArrayLevel,
         layout: ArrayLayout,
-        size: u64,
+        size_bytes: u64,
+        block_size: u64,
         raid_disks: u32,
     ) -> ArrayInfo {
+        let chunksize = if level == ArrayLevel::Raid1 { 0 } else { 1024 };
+        let usable_disk_count = match level {
+            ArrayLevel::Raid0 => raid_disks,
+            ArrayLevel::Raid1 => raid_disks / 2,
+            ArrayLevel::Raid5 => raid_disks - 1,
+            ArrayLevel::Raid6 => raid_disks - 2,
+            _ => todo!("Other raid types"),
+        };
+
+        let data_offset = match level {
+            ArrayLevel::Raid1 => 0x800,  // why 1MB on top of superblock?
+            ArrayLevel::Raid5 => 0x1000, // why 2MB on top of superblock?
+            _ => todo!("unsupported"),
+        };
+        let size_blocks =
+            (size_bytes - (data_offset * block_size)) * usable_disk_count as u64 / block_size;
+
+        let chunk_factor = if chunksize != 0 {
+            chunksize / block_size
+        } else {
+            1
+        };
         ArrayInfo {
             magic: ArrayInfo::SUPERBLOCK_MAGIC,
             major_version: ArrayInfo::MAJOR_VERSION,
@@ -101,8 +124,8 @@ impl ArrayInfo {
             ctime: instant_to_arrayinfo_format(ctime),
             level: level.into(),
             layout: layout.into(),
-            size: size - 2048, // reserve 1MB?
-            chunksize: 0,
+            size: size_blocks / chunk_factor,
+            chunksize: chunksize as u32,
             raid_disks,
             opaque_union_bitmap_offset_ppl: 0, // TODO?
         }
@@ -188,11 +211,16 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
-    pub fn new(device_size: u64, dev_number: u32, device_uuid: Option<Uuid>) -> Self {
+    pub fn new(
+        device_size: u64,
+        data_offset: u64,
+        dev_number: u32,
+        device_uuid: Option<Uuid>,
+    ) -> Self {
         DeviceInfo {
-            data_offset: 0x800,            // why; on top of superblock offset?
-            data_size: device_size - 2048, // reserve 1MB? why?
-            super_offset: 0x8,             // 8* 512b block = 4KiB = 0x1000
+            data_offset,
+            data_size: device_size - data_offset,
+            super_offset: 0x8, // 8* 512b block = 4KiB = 0x1000
             recovery_offset: 0,
             dev_number,
             cnt_corrected_read: 0, // Initialize to 0
@@ -291,6 +319,7 @@ impl MdpSuperblock1 {
         name: &str,
         uuid: Option<Uuid>,
         size_bytes: u64,
+        block_size: u64,
         disk_count: u32,
         device_info: DeviceInfo,
         raid_level: ArrayLevel,
@@ -302,6 +331,11 @@ impl MdpSuperblock1 {
             ));
         }
         let array_uuid = uuid.unwrap_or_else(Uuid::new_v4);
+        let layout = match raid_level {
+            // default? unclear, should be ignored
+            ArrayLevel::Raid1 => ArrayLayout::LeftAsymmetric,
+            _ => ArrayLayout::LeftSymmetric,
+        };
 
         let now = Instant::now();
         let array_info = ArrayInfo::new(
@@ -309,8 +343,9 @@ impl MdpSuperblock1 {
             &format!("{host}:{name}"),
             now,
             raid_level,
-            ArrayLayout::LeftAsymmetric,
+            layout,
             size_bytes,
+            block_size,
             disk_count,
         );
 
@@ -327,7 +362,7 @@ impl MdpSuperblock1 {
         let max_dev = 0x80; // 128
         let array_state_info = ArrayStateInfo {
             utime: 0,
-            events: 16, // why?
+            events: 18, // why?
             resync_offset: 0xffffffffffffffff,
             sb_csum: 0,
             max_dev,

@@ -6,6 +6,7 @@ use std::ffi::CString;
 use std::fs::OpenOptions;
 use std::io::Error;
 use std::os::linux::fs::MetadataExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 
 struct DiskMeta {
@@ -87,9 +88,13 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
+        .mode(0o600)
         .open(&tmp_path)
         .context(format!("Can't get fd (open) from {}", tmp_path))?;
     let fd = file.as_raw_fd();
+
+    // remove the file so no one else can touch it - we still have the fd open
+    std::fs::remove_file(&tmp_path).context("failed to delete tmp path")?;
 
     // if we previously did this half-way, then the array is
     // up but 'inactive' - we stop it blindly and ignore errors
