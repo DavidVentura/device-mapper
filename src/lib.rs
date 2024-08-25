@@ -433,3 +433,56 @@ impl MdpSuperblock1 {
         Self::from_bytes(&buf)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+    #[test]
+    fn test_mdp_superblock1_as_bytes_from_bytes_roundtrip() {
+        let host = "testhost";
+        let name = "testarray";
+        let uuid = Some(Uuid::new_v4());
+        let creation = Utc::now();
+        let size_bytes = 1024 * 1024 * 100; // 100 MB
+        let block_size = 512;
+        let disk_count = 2;
+        let device_info = DeviceInfo::new(size_bytes, block_size, 4096, 0, None);
+        let raid_level = ArrayLevel::Raid1;
+
+        let original_sb = MdpSuperblock1::new(
+            host,
+            name,
+            uuid,
+            creation,
+            size_bytes,
+            block_size,
+            disk_count,
+            device_info,
+            raid_level,
+        )
+        .unwrap();
+
+        let bytes = original_sb.as_bytes();
+        let reconstructed_sb = MdpSuperblock1::from_bytes(&bytes).unwrap();
+
+        assert_eq!(
+            original_sb.array_info.name(),
+            reconstructed_sb.array_info.name()
+        );
+        assert_eq!(
+            original_sb.array_info.uuid(),
+            reconstructed_sb.array_info.uuid()
+        );
+        let og_level = original_sb.array_info.level;
+        let reconstructed_level = reconstructed_sb.array_info.level;
+        assert_eq!(og_level, reconstructed_level);
+        assert_eq!(
+            original_sb.device_info.data_offset,
+            reconstructed_sb.device_info.data_offset
+        );
+        assert_eq!(
+            original_sb.array_state_info.events,
+            reconstructed_sb.array_state_info.events
+        );
+    }
+}
