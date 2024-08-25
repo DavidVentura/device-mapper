@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use chrono::Utc;
 use device_mapper::ioctl::blkgetsize64;
 use device_mapper::{ArrayLevel, DeviceInfo, MdpSuperblock1};
 use std::fs::OpenOptions;
@@ -10,6 +11,7 @@ use uuid::Uuid;
 mod assemble;
 
 fn main() {
+    /*
     let bad = format!(
         "BAD\n{:#?}",
         MdpSuperblock1::from_file("my-device-3", 0x1000)
@@ -26,8 +28,9 @@ fn main() {
         .unwrap()
         .write_all(&good.as_bytes())
         .unwrap();
-    _create_example_array()
-    //assemble::assemble_array(&vec!["/dev/loop1", "/dev/loop8", "/dev/loop9"], 123).unwrap();
+        */
+    _create_example_array();
+    assemble::assemble_array(&vec!["/dev/loop1", "/dev/loop8", "/dev/loop9"], 123).unwrap();
 }
 
 fn get_size(path: &Path) -> Result<u64> {
@@ -74,6 +77,7 @@ fn create_array(level: ArrayLevel, backing_devs: &[&str]) -> Result<()> {
         _ => todo!("unsupported"),
     };
 
+    let now = Utc::now();
     for (i, dev) in backing_devs.iter().enumerate() {
         let block_size = 512;
         let path = Path::new(dev);
@@ -84,6 +88,7 @@ fn create_array(level: ArrayLevel, backing_devs: &[&str]) -> Result<()> {
             host,
             array_name,
             array_uuid,
+            now,
             min_disk_size,
             block_size,
             backing_devs.len() as u32,
@@ -100,7 +105,7 @@ fn create_array(level: ArrayLevel, backing_devs: &[&str]) -> Result<()> {
 
 fn _create_example_array() {
     create_array(
-        ArrayLevel::Raid5,
+        ArrayLevel::Raid1,
         &vec!["my-device-1", "my-device-2", "my-device-3"],
         //&vec!["my-device-1", "my-device-2"],
     )

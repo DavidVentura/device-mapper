@@ -9,6 +9,7 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 
+const MD_MAJOR_DEV_ID: u32 = 9;
 struct DiskMeta {
     superblock: MdpSuperblock1,
     major: u32,
@@ -45,24 +46,26 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
     }
 
     let array_info = ioctl::mdu_array_info_t {
-        major_version: 1,  // why
-        minor_version: 2,  // why
-        patch_version: 0,  // why
-        ctime: 0,          // ???
-        utime: 0,          // ???
-        md_minor: -1,      // from mdadm, idk
-        not_persistent: 0, // ??
-        state: 1,          // from mdadm, idk
-        nr_disks: meta.len() as i32,
-        active_disks: meta.len() as i32, // mdadm does 0 at the beginning
-        working_disks: meta.len() as i32,
+        major_version: 1,
+        minor_version: 2,
+        patch_version: 0,
+        // mdadm sets all of these to zero??
+        // what's the point??
+        ctime: 0,
+        utime: 0,
+        md_minor: 0,
+        not_persistent: 0,
+        state: 0,
+        nr_disks: 0,
+        active_disks: 0,
+        working_disks: 0,
         failed_disks: 0,
         spare_disks: 0,
-        layout: first_sb.array_info.layout as i32,
-        level: first_sb.array_info.level as i32,
-        size: first_sb.array_info.size as i32,
-        raid_disks: first_sb.array_info.raid_disks as i32,
-        chunk_size: first_sb.array_info.chunksize as i32,
+        layout: 0,
+        level: 0,
+        size: 0,
+        raid_disks: 0,
+        chunk_size: 0,
     };
 
     // Create a temporary device node
@@ -74,7 +77,7 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
     }
     unsafe {
         // this 1 == md<1>
-        let dev = libc::makedev(9, md_dev_num);
+        let dev = libc::makedev(MD_MAJOR_DEV_ID, md_dev_num);
         if libc::mknod(tmp_c_path.as_ptr(), libc::S_IFBLK | 0o660, dev) != 0 {
             return Err(anyhow!(
                 "Can't mknod {}: {}",
@@ -101,6 +104,7 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
     // should probably be cleaner
     unsafe { ioctl::stop_array(fd) };
 
+    // println!("{array_info:?}");
     // Set array info
     let errno = unsafe { ioctl::set_array_info(fd, &array_info) };
 
@@ -121,6 +125,7 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
             // Assuming the disk is in a good state
             state: (1 << ioctl::MD_DISK_SYNC) | (1 << ioctl::MD_DISK_ACTIVE),
         };
+        // println!("{disk_info:?}");
 
         let errno = unsafe { ioctl::add_new_disk(fd, &disk_info) };
         if errno != 0 {

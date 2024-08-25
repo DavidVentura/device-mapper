@@ -1,9 +1,9 @@
 use arrayref::array_ref;
+use chrono::{DateTime, Utc};
 use std::convert::From;
 use std::fs::File;
 use std::io::{self, Error, Read, Seek, SeekFrom};
 use std::string::FromUtf8Error;
-use std::time::Instant;
 use uuid::Uuid;
 
 pub mod ioctl;
@@ -60,11 +60,9 @@ impl From<ArrayLayout> for u32 {
     }
 }
 
-fn instant_to_arrayinfo_format(instant: Instant) -> u64 {
-    // FIXME: completely wrong
-    let duration = instant.elapsed();
-    let seconds = duration.as_secs();
-    let microseconds = duration.subsec_micros();
+fn instant_to_arrayinfo_format(when: DateTime<Utc>) -> u64 {
+    let seconds = when.timestamp() as u64;
+    let microseconds = when.timestamp_subsec_micros() as u64;
 
     // Combine seconds (lower 40 bits) and microseconds (upper 24 bits)
     (seconds & 0xFFFFFFFFFF) | ((microseconds as u64) << 40)
@@ -82,10 +80,11 @@ impl ArrayInfo {
     const SUPERBLOCK_MAGIC: u32 = 0xa92b4efc;
     const MAJOR_VERSION: u32 = 1;
 
+    /// ctime must match for all members in the array
     fn new(
         uuid: Uuid,
         name: &str,
-        ctime: Instant,
+        ctime: DateTime<Utc>,
         level: ArrayLevel,
         layout: ArrayLayout,
         size_bytes: u64,
@@ -133,7 +132,7 @@ impl ArrayInfo {
     pub fn creation(&self) -> chrono::NaiveDateTime {
         let seconds: u64 = self.ctime & 0xffffffff; // bottom 40b
         let micros: u32 = ((self.ctime & 0xffffff00000000) >> 40) as u32; // top 24b
-        chrono::DateTime::from_timestamp(seconds as i64, micros * 1000)
+        DateTime::from_timestamp(seconds as i64, micros * 1000)
             .unwrap()
             .naive_local()
     }
@@ -318,6 +317,7 @@ impl MdpSuperblock1 {
         host: &str,
         name: &str,
         uuid: Option<Uuid>,
+        creation: DateTime<Utc>,
         size_bytes: u64,
         block_size: u64,
         disk_count: u32,
@@ -337,11 +337,10 @@ impl MdpSuperblock1 {
             _ => ArrayLayout::LeftSymmetric,
         };
 
-        let now = Instant::now();
         let array_info = ArrayInfo::new(
             array_uuid,
             &format!("{host}:{name}"),
-            now,
+            creation,
             raid_level,
             layout,
             size_bytes,
@@ -361,7 +360,7 @@ impl MdpSuperblock1 {
 
         let max_dev = 0x80; // 128
         let array_state_info = ArrayStateInfo {
-            utime: 0,
+            utime: instant_to_arrayinfo_format(creation),
             events: 18, // why?
             resync_offset: 0xffffffffffffffff,
             sb_csum: 0,
