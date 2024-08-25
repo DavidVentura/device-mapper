@@ -211,14 +211,16 @@ pub struct DeviceInfo {
 
 impl DeviceInfo {
     pub fn new(
-        device_size: u64,
-        data_offset: u64,
+        device_size_bytes: u64,
+        block_size: u64,
+        data_offset_blocks: u64,
         dev_number: u32,
         device_uuid: Option<Uuid>,
     ) -> Self {
+        let device_size_blocks = device_size_bytes / block_size;
         DeviceInfo {
-            data_offset,
-            data_size: device_size - data_offset,
+            data_offset: data_offset_blocks,
+            data_size: device_size_blocks - data_offset_blocks,
             super_offset: 0x8, // 8* 512b block = 4KiB = 0x1000
             recovery_offset: 0,
             dev_number,
@@ -409,7 +411,6 @@ impl MdpSuperblock1 {
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut byte_vec: Vec<u8> = Vec::new();
 
-        // Assuming you have dev_roles as Vec<u16>
         for &role in &self.dev_roles {
             byte_vec.extend_from_slice(&role.to_le_bytes());
         }

@@ -1,4 +1,4 @@
-use crate::MdpSuperblock1;
+use crate::{block, MdpSuperblock1};
 use anyhow::{anyhow, bail, Context, Result};
 use device_mapper::ioctl;
 use libc;
@@ -8,6 +8,7 @@ use std::io::Error;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
+use std::path::Path;
 
 const MD_MAJOR_DEV_ID: u32 = 9;
 struct DiskMeta {
@@ -21,7 +22,7 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
     let mut meta = Vec::new();
     for path in disk_paths {
         let md = std::fs::metadata(path).unwrap();
-        let is_block = (md.st_mode() & libc::S_IFMT) == libc::S_IFBLK;
+        let is_block = block::is_block(Path::new(path))?;
         if !is_block {
             bail!("{path} is not a block device, cannot be assembled")
         }
@@ -41,7 +42,7 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
     let first_uuid = first_sb.array_info.uuid();
     for _meta in &meta[1..] {
         if _meta.superblock.array_info.uuid() != first_uuid {
-            return Err(anyhow!("Disks do not belong to the same array"));
+            bail!("Disks do not belong to the same array");
         }
     }
 
@@ -109,10 +110,7 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
     let errno = unsafe { ioctl::set_array_info(fd, &array_info) };
 
     if errno != 0 {
-        return Err(anyhow!(
-            "Can't set_array_info: {}",
-            Error::from_raw_os_error(errno)
-        ));
+        bail!("Can't set_array_info: {}", Error::from_raw_os_error(errno));
     }
 
     // Add disks to the array
@@ -129,10 +127,7 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
 
         let errno = unsafe { ioctl::add_new_disk(fd, &disk_info) };
         if errno != 0 {
-            return Err(anyhow!(
-                "Can't add_new_disk: {}",
-                Error::from_raw_os_error(errno)
-            ));
+            bail!("Can't add_new_disk: {}", Error::from_raw_os_error(errno));
         }
     }
 
@@ -140,10 +135,7 @@ pub fn assemble_array(disk_paths: &[&str], md_dev_num: u32) -> Result<()> {
     let errno = unsafe { ioctl::run_array(fd, std::ptr::null()) };
 
     if errno != 0 {
-        return Err(anyhow!(
-            "Can't run_array: {}",
-            Error::from_raw_os_error(errno)
-        ));
+        bail!("Can't run_array: {}", Error::from_raw_os_error(errno));
     }
 
     Ok(())
